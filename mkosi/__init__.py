@@ -2533,7 +2533,8 @@ def install_arch(args: CommandLineArguments, root: str, do_run_build_script: boo
 
     if not do_run_build_script and args.bootable:
         hooks_dir = os.path.join(root, "etc/pacman.d/hooks")
-        scripts_dir = os.path.join(root, "etc/pacman.d/scripts")
+        scripts_dir_suffix = "etc/pacman.d/scripts"
+        scripts_dir = os.path.join(root, hooks_dir_suffix)
 
         os.makedirs(hooks_dir, 0o755, exist_ok=True)
         os.makedirs(scripts_dir, 0o755, exist_ok=True)
@@ -2541,35 +2542,8 @@ def install_arch(args: CommandLineArguments, root: str, do_run_build_script: boo
         # Disable depmod pacman hook as depmod is handled by kernel-install as well.
         os.symlink("/dev/null", os.path.join(hooks_dir, "60-depmod.hook"))
 
-        kernel_add_hook = os.path.join(hooks_dir, "90-mkosi-kernel-add.hook")
-        with open(kernel_add_hook, "w") as f:
-            f.write(
-                dedent(
-                    """\
-                    [Trigger]
-                    Operation = Install
-                    Operation = Upgrade
-                    Type = Path
-                    Target = usr/lib/modules/*/vmlinuz
-                    Target = usr/lib/kernel/install.d/*
-                    Target = boot/*-ucode.img
-
-                    [Trigger]
-                    Operation = Install
-                    Operation = Upgrade
-                    Type = Package
-                    Target = systemd
-
-                    [Action]
-                    Description = Adding kernel and initramfs images to /boot...
-                    When = PostTransaction
-                    Exec = /etc/pacman.d/scripts/mkosi-kernel-add
-                    NeedsTargets
-                    """
-                )
-            )
-
-        kernel_add_script = os.path.join(scripts_dir, "mkosi-kernel-add")
+        kernel_add_script_name = "mkosi-kernel-add"
+        kernel_add_script = os.path.join(scripts_dir, kernel_add_script_name)
         with open(kernel_add_script, "w") as f:
             f.write(
                 dedent(
@@ -2607,26 +2581,37 @@ def install_arch(args: CommandLineArguments, root: str, do_run_build_script: boo
 
         make_executable(kernel_add_script)
 
-        kernel_remove_hook = os.path.join(hooks_dir, "60-mkosi-kernel-remove.hook")
-        with open(kernel_remove_hook, "w") as f:
+        kernel_add_hook = os.path.join(hooks_dir, "90-mkosi-kernel-add.hook")
+        with open(kernel_add_hook, "w") as f:
             f.write(
                 dedent(
                     """\
                     [Trigger]
+                    Operation = Install
                     Operation = Upgrade
-                    Operation = Remove
                     Type = Path
                     Target = usr/lib/modules/*/vmlinuz
+                    Target = usr/lib/kernel/install.d/*
+                    Target = boot/*-ucode.img
+
+                    [Trigger]
+                    Operation = Install
+                    Operation = Upgrade
+                    Type = Package
+                    Target = systemd
 
                     [Action]
-                    Description = Removing kernel and initramfs images from /boot...
-                    When = PreTransaction
-                    Exec = /etc/pacman.d/mkosi-kernel-remove
+                    Description = Adding kernel and initramfs images to /boot...
+                    When = PostTransaction
+                    Exec = {}
                     NeedsTargets
-                    """
+                    """.format(
+                        os.path.join("/", scripts_dir_suffix, kernel_add_script_name)
+                    )
                 )
             )
 
+        kernel_remove_script_name = "mkosi-kernel-remove"
         kernel_remove_script = os.path.join(scripts_dir, "mkosi-kernel-remove")
         with open(kernel_remove_script, "w") as f:
             f.write(
@@ -2642,6 +2627,28 @@ def install_arch(args: CommandLineArguments, root: str, do_run_build_script: boo
             )
 
         make_executable(kernel_remove_script)
+
+        kernel_remove_hook = os.path.join(hooks_dir, "60-mkosi-kernel-remove.hook")
+        with open(kernel_remove_hook, "w") as f:
+            f.write(
+                dedent(
+                    """\
+                    [Trigger]
+                    Operation = Upgrade
+                    Operation = Remove
+                    Type = Path
+                    Target = usr/lib/modules/*/vmlinuz
+
+                    [Action]
+                    Description = Removing kernel and initramfs images from /boot...
+                    When = PreTransaction
+                    Exec = {}
+                    NeedsTargets
+                    """.format(
+                        os.path.join("/", scripts_dir_suffix, kernel_remove_script_name)
+                    )
+                )
+            )
 
         if args.esp_partno is not None:
             bootctl_update_hook = os.path.join(hooks_dir, "91-mkosi-bootctl-update.hook")
